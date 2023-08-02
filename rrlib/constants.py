@@ -33,6 +33,14 @@ CODE_NXDOMAIN = 3  # Non-existent domain
 CODE_NOTIMP   = 4  # Not implemented
 CODE_REFUSED  = 5  # Query refused
 
+# Error strings for each DNS response code that indicates a fatal error
+CODE_ERROR_STRING = {
+    CODE_FORMERR:  'Query rejected due to format error',
+    CODE_SERVFAIL: 'Query failed due to server error',
+    CODE_NOTIMP:   'Query rejected (not implemented)',
+    CODE_REFUSED:  'Query refused by policy',
+}
+
 # DNS header flags
 FLAG_BIT_QR      = 0b1000000000000000  # Query/response
 FLAG_BITS_OPCODE = 0b0111100000000000  # Opcode

@@ -38,15 +38,6 @@ class DnsQuery:
                            ) + self.question.to_wire()
 
 
-def dns_error_string(rcode):
-    return {
-        rrparams.CODE_FORMERR:  'Query rejected due to format error',
-        rrparams.CODE_SERVFAIL: 'Query failed due to server error',
-        rrparams.CODE_NOTIMP:   'Query rejected (not implemented)',
-        rrparams.CODE_REFUSED:  'Query refused by policy',
-    }[rcode]
-
-
 # We only ask IN A questions, so we should only receive IN A answers
 class DnsAnswer:
     def __init__(self, rdata):
@@ -63,7 +54,7 @@ class DnsResponse:
 
         # Any error other than NXDOMAIN is fatal
         if rcode != rrparams.CODE_NOERROR and rcode != rrparams.CODE_NXDOMAIN:
-            self.error = dns_error_string(rcode)
+            self.error = rrparams.CODE_ERROR_STRING[rcode]
             eprint('error: From upstream name server: ', self.error)
         elif rcode == rrparams.CODE_NXDOMAIN:
             self.nxdomain = True
@@ -82,7 +73,7 @@ class DnsResponse:
         # We only ever ask IN A questions
         if qtype != rrparams.TYPE_A or qclass != rrparams.CLASS_IN:
             eprint('error: Wrong question type returned (not IN A)')
-            self.error = dns_error_string(rrparams.CODE_FORMERR)
+            self.error = rrparams.CODE_ERROR_STRING[rrparams.CODE_FORMERR]
             return
 
         self.question = DnsQuestion(qname)
@@ -122,7 +113,7 @@ class DnsResponse:
             self.referral_zone = rname
         elif rname != self.referral_zone:
             eprint('error: Inconsistent referrals present in the response, I\'m confused')
-            self.error = dns_error_string(rrparams.CODE_FORMERR)
+            self.error = rrparams.CODE_ERROR_STRING[rrparams.CODE_FORMERR]
             return
 
         eprint('info:     Found referral to "', rdata, '" for zone "', rname, '"')
