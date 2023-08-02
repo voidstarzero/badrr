@@ -71,3 +71,9 @@ ROOT_NAME_SERVERS = [
     # Operated by WIDE Project
     ('j.root-servers.net', '202.12.27.33',   '2001:dc3::35'),
 ]
+
+# Protocol size constants
+LABEL_LEN_MAX   = 63             # Length of the longest label in a DNS name
+NAME_LEN_MAX    = 255            # Length of the longest DNS name
+TTL_VALUE_MAX   = (1 << 31) - 1  # Value of the highest acceptable TTL (in seconds)
+MSG_LEN_MAX_UDP = 512            # Length of the largest allowable DNS message passed over UDP
