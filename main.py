@@ -274,10 +274,12 @@ def cmd_resolve(dns_name):
 
     addresses = do_recursive_resolve(dns_name, rrparams.TYPE_A, rrparams.CLASS_IN)
 
+    # The resolver either returns None...
     if addresses is None:
         print(dns_name, ' does not have an address')
         return False
 
+    # ... or a list with at least one element in it
     for address in addresses:
         print(dns_name, 'has address', address)
     return True
@@ -286,13 +288,14 @@ def cmd_resolve(dns_name):
 def cmd_main():
     """Begin execution of the program from the command line."""
 
-    if len(sys.argv) < 2:
+    if len(sys.argv) != 2:
         eprint('usage: ', sys.argv[0], ' <domain-name>')
-        return
+        return 1
 
-    # Take the only action we can at the moment, recursively resolve the argument
+    # At the moment, we only know how to resolve addresses, so do that
     cmd_resolve(sys.argv[1])
+    return 0
 
 
 if __name__ == '__main__':
-    cmd_main()
+    exit(cmd_main())
