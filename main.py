@@ -23,78 +23,155 @@ def dns_encode_string(s):
     return result.getvalue()
 
 
+# At the moment, the only type we query is A, and the only class we query is IN
 class DnsQuestion:
-    def __init__(self, qname, qtype, qclass):
+    def __init__(self, qname):
         self.qname = qname
-        self.qtype = qtype
-        self.qclass = qclass
+
+    def __eq__(self, other):
+        return self.qname == other.qname
 
     def to_wire(self):
-        return dns_encode_string(self.qname) + struct.pack('!HH', self.qtype, self.qclass)
+        return (dns_encode_string(self.qname) +
+                struct.pack('!HH', rrparams.TYPE_A, rrparams.CLASS_IN))
 
 
-class DnsQueryRequest:
-    def __init__(self, qid, qname, qtype, qclass):
+class DnsQuery:
+    def __init__(self, qid, qname):
         self.qid = qid
-        self.question = DnsQuestion(qname, qtype, qclass)
+        self.question = DnsQuestion(qname)
 
     def to_wire(self):
-        return struct.pack('!HHHHHH', self.qid, 0, 1, 0, 0, 0) + self.question.to_wire()
+        return struct.pack('!HHHHHH',
+                           self.qid,
+                           0,  # All flags clear: outbound, non-recursive query
+                           1,  # One question
+                           0,  # No answer records
+                           0,  # No authority records
+                           0   # No additional records
+                           ) + self.question.to_wire()
 
 
 def dns_error_string(rcode):
     return {
-        rrparams.CODE_NOERROR: None,
-        rrparams.CODE_FORMERR: 'Query rejected due to format error',
+        rrparams.CODE_FORMERR:  'Query rejected due to format error',
         rrparams.CODE_SERVFAIL: 'Query failed due to server error',
-        rrparams.CODE_NXDOMAIN: None,
-        rrparams.CODE_NOTIMP: 'Query rejected (not implemented)',
-        rrparams.CODE_REFUSED: 'Query refused by policy',
+        rrparams.CODE_NOTIMP:   'Query rejected (not implemented)',
+        rrparams.CODE_REFUSED:  'Query refused by policy',
     }[rcode]
 
 
-class DnsRecord:
-    def __init__(self, rname, rtype, rclass, rttl, rdata):
-        self.rname = rname
-        self.rtype = rtype
-        self.rclass = rclass
-        self.rttl = rttl
+# We only ask IN A questions, so we should only receive IN A answers
+class DnsAnswer:
+    def __init__(self, rdata):
         self.rdata = rdata
 
+    def __eq__(self, other):
+        return self.rdata == other.rdata
 
-class DnsQueryResponse:
-    def __init__(self, aa, tc, rcode):
-        self.aa = aa
-        self.tc = tc
-        self.nxdomain = rcode == rrparams.CODE_NXDOMAIN
-        self.error = dns_error_string(rcode)
+
+def dns_is_subdomain(sub, parent):
+    """Determine if sub is a proper subdomain of parent"""
+
+    if parent == '.':
+        # The root is everything's parent
+        return True
+
+    return sub.endswith('.' + parent)
+
+
+class DnsResponse:
+    def __init__(self, rcode, authority):
+        self.error = None
+        self.nxdomain = False
+
+        # Any error other than NXDOMAIN is fatal
+        if rcode != rrparams.CODE_NOERROR and rcode != rrparams.CODE_NXDOMAIN:
+            self.error = dns_error_string(rcode)
+            eprint('error: From upstream name server: ', self.error)
+        elif rcode == rrparams.CODE_NXDOMAIN:
+            self.nxdomain = True
+
+        # Store the authority that generated the response, for checking referrals
+        self.authority_zone = authority
+
+        # Create class fields for later completion
         self.question = None
         self.answers = []
-        self.authority_zone = None
-        self.authorities = []
-        self.additionals = collections.defaultdict(list)
+        self.referral_zone = None
+        self.referrals = []
+        self.glues = collections.defaultdict(list)
 
     def set_question(self, qname, qtype, qclass):
-        self.question = DnsQuestion(qname, qtype, qclass)
-
-    def add_answer(self, rname, rtype, rclass, rttl, rdata):
-        self.answers.append(DnsRecord(rname, rtype, rclass, rttl, rdata))
-
-    def add_authority(self, rname, rtype, rclass, rttl, rdata):
-        if self.authority_zone is None:
-            self.authority_zone = rname
-        elif rname != self.authority_zone:
-            eprint('error: Inconsistent authorities received in response to query')
+        # We only ever ask IN A questions
+        if qtype != rrparams.TYPE_A or qclass != rrparams.CLASS_IN:
+            eprint('error: Wrong question type returned (not IN A)')
             self.error = dns_error_string(rrparams.CODE_FORMERR)
             return
 
-        self.authorities.append(DnsRecord(rname, rtype, rclass, rttl, rdata))
+        self.question = DnsQuestion(qname)
 
-    def add_additional(self, rname, rtype, rclass, rttl, rdata):
-        self.additionals[rname].append(DnsRecord(rname, rtype, rclass, rttl, rdata))
+    def add_answer(self, rname, rtype, rclass, rdata):
+        # We only ever ask IN A questions
+        if rtype != rrparams.TYPE_A or rclass != rrparams.CLASS_IN:
+            eprint('warning: Extra resource record found in answer section (not IN A)')
+            return
+
+        # We should also reasonably expect the answer to be to our question
+        if rname != self.question.qname:
+            eprint('warning: Server included more records than I was asking for')
+            return
+
+        eprint('info:     Found answer "', rdata, '"')
+        self.answers.append(DnsAnswer(rdata))
+
+    def add_authority(self, rname, rtype, rclass, rdata):
+        # We are expecting only IN NS records here
+        if rtype not in (rrparams.TYPE_NS, rrparams.TYPE_SOA) or rclass != rrparams.CLASS_IN:
+            eprint('warning: Extra resource record found in authority section (not IN NS)')
+            return
+
+        # We don't care if someone has packaged us up a spare SOA we didn't ask for
+        # but we don't need it, either
+        if rtype == rrparams.TYPE_SOA:
+            return
+
+        # Make sure we're only being referred to a subdomain of the current authority
+        if not dns_is_subdomain(rname, self.authority_zone):
+            eprint('warning: A referral to a non-subdomain was present, and is being ignored')
+            return
+
+        # The first referral sets the subdomain being referred to, the rest must be the same
+        if self.referral_zone is None:
+            self.referral_zone = rname
+        elif rname != self.referral_zone:
+            eprint('error: Inconsistent referrals present in the response, I\'m confused')
+            self.error = dns_error_string(rrparams.CODE_FORMERR)
+            return
+
+        eprint('info:     Found referral to "', rdata, '" for zone "', rname, '"')
+        self.referrals.append(DnsAnswer(rdata))
+
+    def add_additional(self, rname, rtype, rclass, rdata):
+        # We are expecting only IN A glue records here
+        if rtype not in (rrparams.TYPE_A, rrparams.TYPE_AAAA) or rclass != rrparams.CLASS_IN:
+            eprint('warning: Extra resource record found in additional section (not IN A/AAAA)')
+            return
+
+        # Flag glue that has no relation to the referrals, and don't use it
+        if DnsAnswer(rname) not in self.referrals:
+            eprint('warning: Unnecessary glue received, eww sticky')
+            return
+
+        # Silently discard IPv6 (we're not using it at the moment)
+        if rtype == rrparams.TYPE_AAAA:
+            return
+
+        eprint('info:     Found glue "', rdata, '" for "', rname, '"')
+        self.glues[rname].append(DnsAnswer(rdata))
 
 
-def parse_dns_name(buffer, pos):
+def dns_parse_name(buffer, pos):
     """Parses the DNS-encoded name stored at pos in buffer to a string."""
 
     result = ''
@@ -118,7 +195,7 @@ def parse_dns_name(buffer, pos):
             pos += 1
 
             # Finish parsing at the new location
-            tail, _ = parse_dns_name(buffer, pointer)
+            tail, _ = dns_parse_name(buffer, pointer)
             result += tail
             break
 
@@ -132,92 +209,74 @@ def ip_address_to_text(ip):
     return "{}.{}.{}.{}".format(ip[0], ip[1], ip[2], ip[3])
 
 
-def parse_response(response):
+def dns_parse_response(response, authority):
     # Parse the header
     qid, flags, qdcount, ancount, nscount, arcount = struct.unpack('!HHHHHH', response[:12])
-    result = DnsQueryResponse(flags & rrparams.FLAG_BIT_AA,
-                              flags & rrparams.FLAG_BIT_TC,
-                              flags & rrparams.FLAG_BITS_RCODE)
+    result = DnsResponse(flags & rrparams.FLAG_BITS_RCODE, authority)
 
     if qdcount != 1:
         eprint('error: Received other than 1 question in response')
         return None
 
     # The question begins with the name asked for
-    qname, pos = parse_dns_name(response, 12)
+    qname, pos = dns_parse_name(response, 12)
     qtype, qclass = struct.unpack('!HH', response[pos:pos + 4])
     result.set_question(qname, qtype, qclass)
     pos += 4
 
     for i in range(ancount):
-        rname, pos = parse_dns_name(response, pos)
+        rname, pos = dns_parse_name(response, pos)
         rtype, rclass, rttl, rdlength = struct.unpack('!HHLH', response[pos:pos + 10])
         pos += 10
 
-        # RDATA for an answer should be 4 long (length of an IPv4 address)
         rdata = ip_address_to_text(response[pos:pos + 4])
         # Jump forward rdlength, no matter what
         pos += rdlength
 
-        eprint('info:     Found answer "', rdata, '"')
-
-        result.add_answer(rname, rtype, rclass, rttl, rdata)
+        result.add_answer(rname, rtype, rclass, rdata)
 
     for i in range(nscount):
-        rname, pos = parse_dns_name(response, pos)
+        rname, pos = dns_parse_name(response, pos)
         rtype, rclass, rttl, rdlength = struct.unpack('!HHLH', response[pos:pos + 10])
         pos += 10
 
         # RDATA for an authority should be another name
-        rdata, _ = parse_dns_name(response, pos)
+        rdata, _ = dns_parse_name(response, pos)
         # Jump forward rdlength, no matter what
         pos += rdlength
 
-        eprint('info:     Found referral to "', rdata, '" for zone "', rname, '"')
-
-        result.add_authority(rname, rtype, rclass, rttl, rdata)
+        result.add_authority(rname, rtype, rclass, rdata)
 
     for i in range(arcount):
-        rname, pos = parse_dns_name(response, pos)
+        rname, pos = dns_parse_name(response, pos)
         rtype, rclass, rttl, rdlength = struct.unpack('!HHLH', response[pos:pos + 10])
         pos += 10
-
-        # We only care about glue A records, nothing else
-        if rtype != rrparams.TYPE_A:
-            # Skip the RDATA and do the next one instead
-            pos += rdlength
-            continue
 
         # RDATA of an A record is 4 long
         rdata = ip_address_to_text(response[pos:pos + 4])
         # Jump forward rdlength, no matter what
         pos += rdlength
 
-        eprint('info:     Found glue "', rdata, '" for "', rname, '"')
-
-        result.add_additional(rname, rtype, rclass, rttl, rdata)
+        result.add_additional(rname, rtype, rclass, rdata)
 
     return result
 
 
-def send_query(message, target):
+def dns_send_query(query, target):
+    """Take a DNS query in wire format, send it to target, and return the response packet."""
     # Create a "connected" UDP socket to query the name server
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.connect(target)
 
-    query = message.to_wire()
     sock.send(query)
-    response = sock.recv(512)  # Limit imposed on non-EDNS responses by RFC1035
-
-    result = parse_response(response)
-
-    return result
+    return sock.recv(512)  # Limit imposed on non-EDNS responses by RFC1035
 
 
 def dns_resolve(qname):
     """Perform actual recursive resolution for the address record(s) of the given name."""
 
-    # First, pick a root name server (any will do).
+    # First, pick a root name server (any will do)
+    # For now, we only act over IPv4
     name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
     active_zone = '.'
 
@@ -229,12 +288,14 @@ def dns_resolve(qname):
                '"')
 
         qid = random.randrange(65536)
-        message = DnsQueryRequest(qid, qname, rrparams.TYPE_A, rrparams.CLASS_IN)
+        message = DnsQuery(qid, qname)
 
-        result = send_query(message, (name_server_addr, rrparams.PORT_DNS_UDP))
+        response = dns_send_query(message.to_wire(),
+                                  (name_server_addr, rrparams.PORT_DNS_UDP))
+        result = dns_parse_response(response, active_zone)
 
         if result.error:
-            eprint('error: Query failed due to "', result.error)
+            eprint('error: ', result.error)
             return None
         elif result.nxdomain:
             eprint('info: Name does not exist')
@@ -244,12 +305,12 @@ def dns_resolve(qname):
             return [answer.rdata for answer in result.answers]
 
         # Not found but not denied either, we should try again with new auth servers
-        name_server_name = random.choice([authority.rdata for authority in result.authorities])
-        active_zone = result.authority_zone
+        name_server_name = random.choice([referral.rdata for referral in result.referrals])
+        active_zone = result.referral_zone
 
         # We need to find out the address of the server we've now been asked to query
-        if name_server_name in result.additionals:
-            name_server_addr = random.choice([additional.rdata for additional in result.additionals[name_server_name]])
+        if name_server_name in result.glues:
+            name_server_addr = random.choice([glue.rdata for glue in result.glues[name_server_name]])
         else:
             # Glueless delegation requires a separate lookup for the name server address
             eprint('info: Need address for "', name_server_name, '", restarting recursive resolution')
