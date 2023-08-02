@@ -285,7 +285,7 @@ def do_recursive_resolve(qname, qtype, qclass):
             eprint('info: Name does not exist')
             return None
         elif len(result.answers) > 0:
-            eprint('info: Name resolution completed')
+            eprint('info: Name resolution completed for "', qname, '"')
             return [answer.rdata for answer in result.answers]
 
         # Not found but not denied either, we should try again with new auth servers
@@ -296,8 +296,16 @@ def do_recursive_resolve(qname, qtype, qclass):
         if name_server_name in result.additionals:
             name_server_addr = result.additionals[name_server_name]
         else:
-            # Cheat for now, by doing an external DNS lookup
-            name_server_addr = socket.gethostbyname(name_server_name)
+            # Gluesless delegation requires a separate lookup for the name server address
+            eprint('info: Need address for "', name_server_name, '", restarting recursive resolution')
+
+            candidate_addresses = do_recursive_resolve(name_server_name, TYPE_A, CLASS_IN)
+            if candidate_addresses is None:
+                # We can't go on like this (nowhere to go)!
+                eprint('error: Resolution failed because "', name_server_name, '" does not have an address')
+                return None
+
+            name_server_addr = random.choice([addr for addr in candidate_addresses])
 
 
 def cmd_resolve(dns_name):
