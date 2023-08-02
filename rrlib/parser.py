@@ -122,6 +122,16 @@ def label_decode_name(message: bytes, startpos: int) -> tuple[str, int] | None:
     return name.decode('ascii'), pos
 
 
+def label_strip_left(name: str) -> str:
+    tail = name.split('.', 1)[1]
+
+    # Root ends up empty, so needs special case
+    if tail == '':
+        return '.'
+
+    return tail
+
+
 def name_is_subdomain(name: str, parent: str) -> bool:
     """Determine if name is a proper subdomain of parent"""
 

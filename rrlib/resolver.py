@@ -4,9 +4,14 @@ import socket  # for UDP packets
 import struct  # for DNS message creation/parsing
 
 # Local package imports
+import rrlib.cache as rrcache
 import rrlib.constants as rrparams
-from rrlib.parser import ip_address_decode, label_encode_name, label_decode_name, name_is_subdomain
+from rrlib.parser import ip_address_decode, label_encode_name, label_decode_name, label_strip_left, name_is_subdomain
 from rrlib.utils import eprint
+
+
+ns_cache = rrcache.RecordCache()    # Cache for already looked-up referrals
+addr_cache = rrcache.RecordCache()  # Cache for already looked-up A records
 
 
 # At the moment, the only type we query is A, and the only class we query is IN
@@ -92,6 +97,9 @@ class DnsResponse:
         eprint('info:     Found answer "', rdata, '"')
         self.answers.append(DnsAnswer(rdata))
 
+        # Also, put the answer in the cache
+        addr_cache.add(rname, rdata)
+
     def add_authority(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN NS records here
         if rtype not in (rrparams.TYPE_NS, rrparams.TYPE_SOA) or rclass != rrparams.CLASS_IN:
@@ -119,6 +127,9 @@ class DnsResponse:
         eprint('info:     Found referral to "', rdata, '" for zone "', rname, '"')
         self.referrals.append(DnsAnswer(rdata))
 
+        # Also, put the referral in the cache
+        ns_cache.add(rname, rdata)
+
     def add_additional(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN A glue records here
         if rtype not in (rrparams.TYPE_A, rrparams.TYPE_AAAA) or rclass != rrparams.CLASS_IN:
@@ -136,6 +147,9 @@ class DnsResponse:
 
         eprint('info:     Found glue "', rdata, '" for "', rname, '"')
         self.glues[rname].append(DnsAnswer(rdata))
+
+        # Also, put the address in the cache
+        addr_cache.add(rname, rdata)
 
 
 def parse_response(response: bytes, authority: str) -> DnsResponse | None:
@@ -197,7 +211,7 @@ def parse_response(response: bytes, authority: str) -> DnsResponse | None:
     return result
 
 
-def send_query_udp(query: bytes, target: tuple[str, int]) -> bytes:
+def send_query_udp(query: bytes, target: tuple[str, int]) -> bytes | None:
     """Take a DNS query in wire format, send it to target, and return the response packet."""
 
     # Create a "connected" UDP socket to query the name server
@@ -206,7 +220,11 @@ def send_query_udp(query: bytes, target: tuple[str, int]) -> bytes:
     sock.settimeout(4)  # Suggested in DNS documentation
 
     sock.send(query)
-    message = sock.recv(512)  # Limit imposed on non-EDNS responses by RFC1035
+
+    try:
+        message = sock.recv(512)  # Limit imposed on non-EDNS responses by RFC1035
+    except TimeoutError:
+        message = None
 
     sock.close()
     return message
@@ -247,10 +265,37 @@ def send_query_tcp(query: bytes, target: tuple[str, int]) -> bytes:
 def name_resolve(qname: str) -> list[str] | None:
     """Perform actual recursive resolution for the address record(s) of the given name."""
 
-    # First, pick a root name server (any will do)
+    # If we already have an answer, finish early
+    if addr_cache.contains(qname):
+        eprint('info: Address for "', qname, '" found in cache')
+        return addr_cache.get(qname)
+
+    # Find the closest ancestor domain that has its name server names cached
+    active_zone = qname
+    while active_zone != '.':
+        eprint('info: Considering if we already know about "', active_zone, '"...')
+        if ns_cache.contains(active_zone):
+            # If we find a cached set of name servers, pick one
+            eprint('info: Name servers for "', active_zone, '" were already cached, trying to start there...')
+            name_server_name = random.choice(ns_cache.get(active_zone))
+
+            # Now we need its address
+            candidate_addresses = name_resolve(name_server_name)
+            if candidate_addresses is not None:
+                name_server_addr = random.choice([addr for addr in candidate_addresses])
+                break
+            else:
+                eprint('warning: Couldn\'t look up address for cached name server "', name_server_name,
+                       '", falling through')
+
+        # If we either failed to find cached nameservers, or couldn't find a valid address,
+        # we fall to the next level
+        active_zone = label_strip_left(active_zone)
+
+    # Otherwise, pick a root name server (any will do)
     # For now, we only act over IPv4
-    name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
-    active_zone = '.'
+    if active_zone == '.':
+        name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
 
     while True:
         eprint('info: Querying "', name_server_name,
@@ -265,7 +310,12 @@ def name_resolve(qname: str) -> list[str] | None:
 
         # First, try over UDP
         response = send_query_udp(message, (name_server_addr, rrparams.PORT_DNS_UDP))
-        result = parse_response(response, active_zone)
+
+        # Only try to parse things if we got something back
+        if response is None:
+            result = None
+        else:
+            result = parse_response(response, active_zone)
 
         # If failed for some reason (probably because the packet was lost or discarded due to truncation)
         if result is None:
