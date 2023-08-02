@@ -292,9 +292,9 @@ def name_resolve(qname: str) -> list[str] | None:
         # we fall to the next level
         active_zone = label_strip_left(active_zone)
 
-    # Otherwise, pick a root name server (any will do)
-    # For now, we only act over IPv4
-    if active_zone == '.':
+    else:
+        # Otherwise, pick a root name server (any will do)
+        # For now, we only act over IPv4
         name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
 
     while True:
