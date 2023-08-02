@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import collections # for defaultdict
 import io  # for BytesIO
 import random  # for choice
 import socket  # for UDP packets
@@ -123,7 +124,7 @@ class DnsQueryResponse:
         self.answers = []
         self.authority_zone = None
         self.authorities = []
-        self.additionals = {}
+        self.additionals = collections.defaultdict(list)
 
     def set_question(self, qname, qtype, qclass):
         self.question = DnsQuestion(qname, qtype, qclass)
@@ -141,8 +142,8 @@ class DnsQueryResponse:
 
         self.authorities.append(DnsRecord(rname, rtype, rclass, rttl, rdata))
 
-    def add_additional(self, rname, rdata):
-        self.additionals[rname] = rdata
+    def add_additional(self, rname, rtype, rclass, rttl, rdata):
+        self.additionals[rname].append(DnsRecord(rname, rtype, rclass, rttl, rdata))
 
 
 def parse_dns_name(buffer, pos):
@@ -244,7 +245,7 @@ def parse_response(response):
 
         eprint('info:     Found glue "', rdata, '" for "', rname, '"')
 
-        result.add_additional(rname, rdata)
+        result.add_additional(rname, rtype, rclass, rttl, rdata)
 
     return result
 
@@ -294,7 +295,7 @@ def do_recursive_resolve(qname, qtype, qclass):
 
         # We need to find out the address of the server we've now been asked to query
         if name_server_name in result.additionals:
-            name_server_addr = result.additionals[name_server_name]
+            name_server_addr = random.choice([additional.rdata for additional in result.additionals[name_server_name]])
         else:
             # Gluesless delegation requires a separate lookup for the name server address
             eprint('info: Need address for "', name_server_name, '", restarting recursive resolution')
