@@ -7,7 +7,7 @@ $ ./badrr example.com
 ```
 
 ## Version
-v0.3
+v0.4
 
 ## Why?
 Why not?

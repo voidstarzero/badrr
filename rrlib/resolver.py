@@ -138,9 +138,15 @@ class DnsResponse:
         self.glues[rname].append(DnsAnswer(rdata))
 
 
-def dns_parse_response(response, authority):
+def parse_response(response, authority):
     # Parse the header
     qid, flags, qdcount, ancount, nscount, arcount = struct.unpack('!HHHHHH', response[:12])
+
+    # Handle truncation early, no point working through the rest of the steps on half a message
+    if flags & rrparams.FLAG_BIT_TC:
+        eprint('warning: Response truncated, bailing out early')
+        return None
+
     result = DnsResponse(flags & rrparams.FLAG_BITS_RCODE, authority)
 
     if qdcount != 1:
@@ -191,14 +197,51 @@ def dns_parse_response(response, authority):
     return result
 
 
-def dns_send_query(query, target):
+def send_query_udp(query: bytes, target: tuple[str, int]) -> bytes:
     """Take a DNS query in wire format, send it to target, and return the response packet."""
+
     # Create a "connected" UDP socket to query the name server
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.connect(target)
+    sock.settimeout(4)  # Suggested in DNS documentation
 
     sock.send(query)
-    return sock.recv(512)  # Limit imposed on non-EDNS responses by RFC1035
+    message = sock.recv(512)  # Limit imposed on non-EDNS responses by RFC1035
+
+    sock.close()
+    return message
+
+
+def send_query_tcp(query: bytes, target: tuple[str, int]) -> bytes:
+    """Take a DNS query in wire format, send it to target, and read the full response."""
+
+    # Create a "connected" TCP socket to communicate with the name server
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect(target)
+
+    sock.send(struct.pack('!H', len(query)))
+    sock.sendall(query)
+
+    # How much data to follow, assuming here the transport won't split individual bytes
+    message_len = struct.unpack('!H', sock.recv(2))[0]
+
+    # Initiate the read loop
+    response = bytearray()
+    response_len = 0
+    while response_len < message_len:
+        recv_bytes = sock.recv(message_len - response_len)
+        recv_len = len(recv_bytes)
+
+        # Only done when no more to read
+        if recv_len == 0:
+            break
+
+        # Otherwise, append and keep trying
+        response += recv_bytes
+        response_len = recv_len
+
+    sock.close()
+    return bytes(response)
 
 
 def name_resolve(qname: str) -> list[str] | None:
@@ -216,12 +259,20 @@ def name_resolve(qname: str) -> list[str] | None:
                '" in zone "', active_zone,
                '"')
 
+        # Build our representation of the A query to be sent to the name server
         qid = random.randrange(65536)
-        message = DnsQuery(qid, qname)
+        message = DnsQuery(qid, qname).to_wire()
 
-        response = dns_send_query(message.to_wire(),
-                                  (name_server_addr, rrparams.PORT_DNS_UDP))
-        result = dns_parse_response(response, active_zone)
+        # First, try over UDP
+        response = send_query_udp(message, (name_server_addr, rrparams.PORT_DNS_UDP))
+        result = parse_response(response, active_zone)
+
+        # If failed for some reason (probably because the packet was lost or discarded due to truncation)
+        if result is None:
+            eprint("info: UDP query failed, retrying with TCP...")
+
+            response = send_query_tcp(message, (name_server_addr, rrparams.PORT_DNS_TCP))
+            result = parse_response(response, active_zone)
 
         if result.error:
             eprint('error: ', result.error)
