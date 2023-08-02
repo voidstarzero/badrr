@@ -323,6 +323,10 @@ def cmd_resolve(dns_name):
 def cmd_main():
     """Begin execution of the program from the command line."""
 
+    if len(sys.argv) < 2:
+        eprint('usage: ', sys.argv[0], ' <domain-name>')
+        return
+
     # Take the only action we can at the moment, recursively resolve the argument
     cmd_resolve(sys.argv[1])
 
