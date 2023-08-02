@@ -1,5 +1,5 @@
 # badrr
-A bad recursive DNS resolver
+A bad recursive DNS resolver, v0.2
 
 ## Usage
 ```
