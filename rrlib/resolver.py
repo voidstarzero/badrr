@@ -95,7 +95,7 @@ class DnsResponse:
     def add_authority(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN NS records here
         if rtype not in (rrparams.TYPE_NS, rrparams.TYPE_SOA) or rclass != rrparams.CLASS_IN:
-            eprint('warning: Extra resource record found in authority section (not IN NS)')
+            eprint('warning: Extra resource record found in authority section (not IN NS/SOA)')
             return
 
         # We don't care if someone has packaged us up a spare SOA we didn't ask for,
