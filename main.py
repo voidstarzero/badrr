@@ -7,11 +7,9 @@ import socket  # for UDP packets
 import struct  # for DNS message creation/parsing
 import sys  # for argv, stderr
 
+# Local package imports
 import rrlib.constants as rrparams
-
-
-def eprint(*args, **kwargs):
-    print(*args, **kwargs, file=sys.stderr, sep='')
+from rrlib.utils import eprint
 
 
 def dns_encode_string(s):
