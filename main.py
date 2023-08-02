@@ -1,63 +1,13 @@
 #!/usr/bin/env python3
 
-import collections # for defaultdict
+import collections  # for defaultdict
 import io  # for BytesIO
 import random  # for choice
 import socket  # for UDP packets
 import struct  # for DNS message creation/parsing
 import sys  # for argv, stderr
 
-DNS_PORT = 53
-
-CLASS_IN = 1  # Internet class
-CLASS_CH = 3  # Chaos class
-CLASS_HS = 4  # Hesiod class
-CLASS_NONE = 254  # None class (special)
-CLASS_ANY = 255  # Any class (special)
-
-TYPE_A = 1  # Address record
-TYPE_NS = 2  # Authoritative name server
-TYPE_SOA = 6  # Start of zone of authority
-
-FLAG_BIT_QR      = 0b1000000000000000  # Query/response bit
-FLAG_BITS_OPCODE = 0b0111100000000000  # Query type code bits
-FLAG_BIT_AA      = 0b0000010000000000  # Authoritative answer bit
-FLAG_BIT_TC      = 0b0000001000000000  # Truncation bit
-FLAG_BIT_RD      = 0b0000000100000000  # Recursion desired bit
-FLAG_BIT_RA      = 0b0000000010000000  # Recursion available bit
-FLAG_BIT_AD      = 0b0000000000100000  # Authentic data bit
-FLAG_BIT_CD      = 0b0000000000010000  # Checking disabled bit
-FLAG_BITS_RCODE  = 0b0000000000001111  # Response code bits
-
-OP_QUERY = 0  # Query opcode
-OP_IQUERY = 1  # Inverse query opcode
-OP_STATUS = 2  # Status opcode
-OP_NOTIFY = 4  # Notify opcode
-OP_UPDATE = 5  # Update opcode
-
-CODE_NOERROR = 0
-CODE_FORMERR = 1
-CODE_SERVFAIL = 2
-CODE_NXDOMAIN = 3
-CODE_NOTIMP = 4
-CODE_REFUSED = 5
-
-# A list of every root name server IP
-ROOT_NAME_SERVERS = [
-    ('a.root-servers.net', '198.41.0.4'),
-    ('b.root-servers.net', '199.9.14.201'),
-    ('c.root-servers.net', '192.33.4.12'),
-    ('d.root-servers.net', '199.7.91.13'),
-    ('e.root-servers.net', '192.203.230.10'),
-    ('f.root-servers.net', '192.5.5.241'),
-    ('g.root-servers.net', '192.112.36.4'),
-    ('h.root-servers.net', '198.97.190.53'),
-    ('i.root-servers.net', '192.36.148.17'),
-    ('j.root-servers.net', '192.58.128.30'),
-    ('k.root-servers.net', '193.0.14.129'),
-    ('l.root-servers.net', '199.7.83.42'),
-    ('j.root-servers.net', '202.12.27.33'),
-]
+import rrlib.constants as rrparams
 
 
 def eprint(*args, **kwargs):
@@ -96,12 +46,12 @@ class DnsQueryRequest:
 
 def dns_error_string(rcode):
     return {
-        CODE_NOERROR: None,
-        CODE_FORMERR: 'Query rejected due to format error',
-        CODE_SERVFAIL: 'Query failed due to server error',
-        CODE_NXDOMAIN: None,
-        CODE_NOTIMP: 'Query rejected (not implemented)',
-        CODE_REFUSED: 'Query refused by policy',
+        rrparams.CODE_NOERROR: None,
+        rrparams.CODE_FORMERR: 'Query rejected due to format error',
+        rrparams.CODE_SERVFAIL: 'Query failed due to server error',
+        rrparams.CODE_NXDOMAIN: None,
+        rrparams.CODE_NOTIMP: 'Query rejected (not implemented)',
+        rrparams.CODE_REFUSED: 'Query refused by policy',
     }[rcode]
 
 
@@ -118,7 +68,7 @@ class DnsQueryResponse:
     def __init__(self, aa, tc, rcode):
         self.aa = aa
         self.tc = tc
-        self.nxdomain = rcode == CODE_NXDOMAIN
+        self.nxdomain = rcode == rrparams.CODE_NXDOMAIN
         self.error = dns_error_string(rcode)
         self.question = None
         self.answers = []
@@ -137,7 +87,7 @@ class DnsQueryResponse:
             self.authority_zone = rname
         elif rname != self.authority_zone:
             eprint('error: Inconsistent authorities received in response to query')
-            self.error = dns_error_string(CODE_FORMERR)
+            self.error = dns_error_string(rrparams.CODE_FORMERR)
             return
 
         self.authorities.append(DnsRecord(rname, rtype, rclass, rttl, rdata))
@@ -187,7 +137,9 @@ def ip_address_to_text(ip):
 def parse_response(response):
     # Parse the header
     qid, flags, qdcount, ancount, nscount, arcount = struct.unpack('!HHHHHH', response[:12])
-    result = DnsQueryResponse(flags & FLAG_BIT_AA, flags & FLAG_BIT_TC, flags & FLAG_BITS_RCODE)
+    result = DnsQueryResponse(flags & rrparams.FLAG_BIT_AA,
+                              flags & rrparams.FLAG_BIT_TC,
+                              flags & rrparams.FLAG_BITS_RCODE)
 
     if qdcount != 1:
         eprint('error: Received other than 1 question in response')
@@ -233,14 +185,14 @@ def parse_response(response):
         pos += 10
 
         # We only care about glue A records, nothing else
-        if rtype != TYPE_A:
+        if rtype != rrparams.TYPE_A:
             # Skip the RDATA and do the next one instead
             pos += rdlength
             continue
 
         # RDATA of an A record is 4 long
         rdata = ip_address_to_text(response[pos:pos + 4])
-        # Jump forward rdlenght, no matter what
+        # Jump forward rdlength, no matter what
         pos += rdlength
 
         eprint('info:     Found glue "', rdata, '" for "', rname, '"')
@@ -268,16 +220,20 @@ def do_recursive_resolve(qname, qtype, qclass):
     """Perform actual recursive resolution of the given record name, type and class."""
 
     # First, pick a root name server (any will do).
-    name_server_name, name_server_addr = random.choice(ROOT_NAME_SERVERS)
+    name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
     active_zone = '.'
 
     while True:
-        eprint('info: Querying "', name_server_name, '" (', name_server_addr, ') for "', qname, '" in zone "', active_zone, '"')
+        eprint('info: Querying "', name_server_name,
+               '" (', name_server_addr,
+               ') for "', qname,
+               '" in zone "', active_zone,
+               '"')
 
         qid = random.randrange(65536)
         message = DnsQueryRequest(qid, qname, qtype, qclass)
 
-        result = send_query(message, (name_server_addr, DNS_PORT))
+        result = send_query(message, (name_server_addr, rrparams.PORT_DNS_UDP))
 
         if result.error:
             eprint('error: Query failed due to "', result.error)
@@ -297,10 +253,10 @@ def do_recursive_resolve(qname, qtype, qclass):
         if name_server_name in result.additionals:
             name_server_addr = random.choice([additional.rdata for additional in result.additionals[name_server_name]])
         else:
-            # Gluesless delegation requires a separate lookup for the name server address
+            # Glueless delegation requires a separate lookup for the name server address
             eprint('info: Need address for "', name_server_name, '", restarting recursive resolution')
 
-            candidate_addresses = do_recursive_resolve(name_server_name, TYPE_A, CLASS_IN)
+            candidate_addresses = do_recursive_resolve(name_server_name, rrparams.TYPE_A, rrparams.CLASS_IN)
             if candidate_addresses is None:
                 # We can't go on like this (nowhere to go)!
                 eprint('error: Resolution failed because "', name_server_name, '" does not have an address')
@@ -318,7 +274,7 @@ def cmd_resolve(dns_name):
 
     eprint('info: Resolving name "', dns_name, '"')
 
-    addresses = do_recursive_resolve(dns_name, TYPE_A, CLASS_IN)
+    addresses = do_recursive_resolve(dns_name, rrparams.TYPE_A, rrparams.CLASS_IN)
 
     if addresses is None:
         print(dns_name, ' does not have an address')
