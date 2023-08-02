@@ -214,8 +214,8 @@ def send_query(message, target):
     return result
 
 
-def do_recursive_resolve(qname, qtype, qclass):
-    """Perform actual recursive resolution of the given record name, type and class."""
+def dns_resolve(qname):
+    """Perform actual recursive resolution for the address record(s) of the given name."""
 
     # First, pick a root name server (any will do).
     name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
@@ -229,7 +229,7 @@ def do_recursive_resolve(qname, qtype, qclass):
                '"')
 
         qid = random.randrange(65536)
-        message = DnsQueryRequest(qid, qname, qtype, qclass)
+        message = DnsQueryRequest(qid, qname, rrparams.TYPE_A, rrparams.CLASS_IN)
 
         result = send_query(message, (name_server_addr, rrparams.PORT_DNS_UDP))
 
@@ -254,7 +254,7 @@ def do_recursive_resolve(qname, qtype, qclass):
             # Glueless delegation requires a separate lookup for the name server address
             eprint('info: Need address for "', name_server_name, '", restarting recursive resolution')
 
-            candidate_addresses = do_recursive_resolve(name_server_name, rrparams.TYPE_A, rrparams.CLASS_IN)
+            candidate_addresses = dns_resolve(name_server_name)
             if candidate_addresses is None:
                 # We can't go on like this (nowhere to go)!
                 eprint('error: Resolution failed because "', name_server_name, '" does not have an address')
@@ -263,25 +263,38 @@ def do_recursive_resolve(qname, qtype, qclass):
             name_server_addr = random.choice([addr for addr in candidate_addresses])
 
 
-def cmd_resolve(dns_name):
+def dns_qualify(name):
+    """Translates a (possibly-relative) name into a fully-qualified domain name."""
+    # Special case: an empty name should be qualified to the root
+    if len(name) == 0:
+        return '.'
+
+    # If it already ends in a dot, nothing more to do
+    if name[-1] == '.':
+        return name
+
+    # Otherwise, append a dot
+    return name + '.'
+
+
+def cmd_resolve(qname):
     """Resolve the given dns_name by performing recursive DNS queries from the root."""
 
-    # Force the string provided to be fully-qualified
-    if dns_name[-1] != '.':
-        dns_name += '.'
+    # Force the string provided to be fully-qualified, as expected by the resolver routines
+    qname = dns_qualify(qname)
 
-    eprint('info: Resolving name "', dns_name, '"')
+    eprint('info: Resolving name "', qname, '"')
 
-    addresses = do_recursive_resolve(dns_name, rrparams.TYPE_A, rrparams.CLASS_IN)
+    addresses = dns_resolve(qname)
 
     # The resolver either returns None...
     if addresses is None:
-        print(dns_name, ' does not have an address')
+        print(qname, 'does not have an address')
         return False
 
     # ... or a list with at least one element in it
     for address in addresses:
-        print(dns_name, 'has address', address)
+        print(qname, 'has address', address)
     return True
 
 
