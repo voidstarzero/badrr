@@ -1,15 +1,18 @@
 # badrr
-A bad recursive DNS resolver, v0.2
+A bad recursive DNS resolver
 
 ## Usage
 ```
 $ ./badrr example.com
 ```
 
+## Version
+v0.2
+
 ## Why?
 Why not?
 
-I wanted to learn more about how the low-level details of DNS works, so here is my journey.
+I wanted to learn more about how the low-level details of DNS work, so here is my journey.
 
 ## Todo
 - Process errors (correctly).
