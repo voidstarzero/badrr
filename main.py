@@ -42,20 +42,20 @@ CODE_NOTIMP = 4
 CODE_REFUSED = 5
 
 # A list of every root name server IP
-ROOT_NS_IPS = [
-    '198.41.0.4',      # a.root-servers.net
-    '199.9.14.201',    # b.root-servers.net
-    '192.33.4.12',     # c.root-servers.net
-    '199.7.91.13',     # d.root-servers.net
-    '192.203.230.10',  # e.root-servers.net
-    '192.5.5.241',     # f.root-servers.net
-    '192.112.36.4',    # g.root-servers.net
-    '198.97.190.53',   # h.root-servers.net
-    '192.36.148.17',   # i.root-servers.net
-    '192.58.128.30',   # j.root-servers.net
-    '193.0.14.129',    # k.root-servers.net
-    '199.7.83.42',     # l.root-servers.net
-    '202.12.27.33',    # j.root-servers.net
+ROOT_NAME_SERVERS = [
+    ('a.root-servers.net', '198.41.0.4'),
+    ('b.root-servers.net', '199.9.14.201'),
+    ('c.root-servers.net', '192.33.4.12'),
+    ('d.root-servers.net', '199.7.91.13'),
+    ('e.root-servers.net', '192.203.230.10'),
+    ('f.root-servers.net', '192.5.5.241'),
+    ('g.root-servers.net', '192.112.36.4'),
+    ('h.root-servers.net', '198.97.190.53'),
+    ('i.root-servers.net', '192.36.148.17'),
+    ('j.root-servers.net', '192.58.128.30'),
+    ('k.root-servers.net', '193.0.14.129'),
+    ('l.root-servers.net', '199.7.83.42'),
+    ('j.root-servers.net', '202.12.27.33'),
 ]
 
 
@@ -123,6 +123,7 @@ class DnsQueryResponse:
         self.answers = []
         self.authority_zone = None
         self.authorities = []
+        self.additionals = {}
 
     def set_question(self, qname, qtype, qclass):
         self.question = DnsQuestion(qname, qtype, qclass)
@@ -139,6 +140,9 @@ class DnsQueryResponse:
             return
 
         self.authorities.append(DnsRecord(rname, rtype, rclass, rttl, rdata))
+
+    def add_additional(self, rname, rdata):
+        self.additionals[rname] = rdata
 
 
 def parse_dns_name(buffer, pos):
@@ -222,6 +226,26 @@ def parse_response(response):
 
         result.add_authority(rname, rtype, rclass, rttl, rdata)
 
+    for i in range(arcount):
+        rname, pos = parse_dns_name(response, pos)
+        rtype, rclass, rttl, rdlength = struct.unpack('!HHLH', response[pos:pos + 10])
+        pos += 10
+
+        # We only care about glue A records, nothing else
+        if rtype != TYPE_A:
+            # Skip the RDATA and do the next one instead
+            pos += rdlength
+            continue
+
+        # RDATA of an A record is 4 long
+        rdata = ip_address_to_text(response[pos:pos + 4])
+        # Jump forward rdlenght, no matter what
+        pos += rdlength
+
+        eprint('info:     Found glue "', rdata, '" for "', rname, '"')
+
+        result.add_additional(rname, rdata)
+
     return result
 
 
@@ -243,16 +267,16 @@ def do_recursive_resolve(qname, qtype, qclass):
     """Perform actual recursive resolution of the given record name, type and class."""
 
     # First, pick a root name server (any will do).
-    name_server = random.choice(ROOT_NS_IPS)
+    name_server_name, name_server_addr = random.choice(ROOT_NAME_SERVERS)
     active_zone = '.'
 
     while True:
-        eprint('info: Querying "', name_server, '" for zone "', active_zone, '"')
+        eprint('info: Querying "', name_server_name, '" (', name_server_addr, ') for "', qname, '" in zone "', active_zone, '"')
 
         qid = random.randrange(65536)
         message = DnsQueryRequest(qid, qname, qtype, qclass)
 
-        result = send_query(message, (name_server, DNS_PORT))
+        result = send_query(message, (name_server_addr, DNS_PORT))
 
         if result.error:
             eprint('error: Query failed due to "', result.error)
@@ -265,8 +289,15 @@ def do_recursive_resolve(qname, qtype, qclass):
             return [answer.rdata for answer in result.answers]
 
         # Not found but not denied either, we should try again with new auth servers
-        name_server = random.choice([authority.rdata for authority in result.authorities])
+        name_server_name = random.choice([authority.rdata for authority in result.authorities])
         active_zone = result.authority_zone
+
+        # We need to find out the address of the server we've now been asked to query
+        if name_server_name in result.additionals:
+            name_server_addr = result.additionals[name_server_name]
+        else:
+            # Cheat for now, by doing an external DNS lookup
+            name_server_addr = socket.gethostbyname(name_server_name)
 
 
 def cmd_resolve(dns_name):
