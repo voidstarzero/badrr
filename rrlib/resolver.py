@@ -11,23 +11,23 @@ from rrlib.utils import eprint
 
 # At the moment, the only type we query is A, and the only class we query is IN
 class DnsQuestion:
-    def __init__(self, qname):
+    def __init__(self, qname: str):
         self.qname = qname
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return self.qname == other.qname
 
-    def to_wire(self):
+    def to_wire(self) -> bytes:
         return (label_encode_name(self.qname) +
                 struct.pack('!HH', rrparams.TYPE_A, rrparams.CLASS_IN))
 
 
 class DnsQuery:
-    def __init__(self, qid, qname):
+    def __init__(self, qid: int, qname: str):
         self.qid = qid
         self.question = DnsQuestion(qname)
 
-    def to_wire(self):
+    def to_wire(self) -> bytes:
         return struct.pack('!HHHHHH',
                            self.qid,
                            0,  # All flags clear: outbound, non-recursive query
@@ -40,15 +40,15 @@ class DnsQuery:
 
 # We only ask IN A questions, so we should only receive IN A answers
 class DnsAnswer:
-    def __init__(self, rdata):
+    def __init__(self, rdata: str):
         self.rdata = rdata
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return self.rdata == other.rdata
 
 
 class DnsResponse:
-    def __init__(self, rcode, authority):
+    def __init__(self, rcode: int, authority: str):
         self.error = None
         self.nxdomain = False
 
@@ -69,7 +69,7 @@ class DnsResponse:
         self.referrals = []
         self.glues = collections.defaultdict(list)
 
-    def set_question(self, qname, qtype, qclass):
+    def set_question(self, qname: str, qtype: int, qclass: int) -> None:
         # We only ever ask IN A questions
         if qtype != rrparams.TYPE_A or qclass != rrparams.CLASS_IN:
             eprint('error: Wrong question type returned (not IN A)')
@@ -78,7 +78,7 @@ class DnsResponse:
 
         self.question = DnsQuestion(qname)
 
-    def add_answer(self, rname, rtype, rclass, rdata):
+    def add_answer(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We only ever ask IN A questions
         if rtype != rrparams.TYPE_A or rclass != rrparams.CLASS_IN:
             eprint('warning: Extra resource record found in answer section (not IN A)')
@@ -92,7 +92,7 @@ class DnsResponse:
         eprint('info:     Found answer "', rdata, '"')
         self.answers.append(DnsAnswer(rdata))
 
-    def add_authority(self, rname, rtype, rclass, rdata):
+    def add_authority(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN NS records here
         if rtype not in (rrparams.TYPE_NS, rrparams.TYPE_SOA) or rclass != rrparams.CLASS_IN:
             eprint('warning: Extra resource record found in authority section (not IN NS)')
@@ -119,7 +119,7 @@ class DnsResponse:
         eprint('info:     Found referral to "', rdata, '" for zone "', rname, '"')
         self.referrals.append(DnsAnswer(rdata))
 
-    def add_additional(self, rname, rtype, rclass, rdata):
+    def add_additional(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN A glue records here
         if rtype not in (rrparams.TYPE_A, rrparams.TYPE_AAAA) or rclass != rrparams.CLASS_IN:
             eprint('warning: Extra resource record found in additional section (not IN A/AAAA)')
@@ -138,7 +138,7 @@ class DnsResponse:
         self.glues[rname].append(DnsAnswer(rdata))
 
 
-def parse_response(response, authority):
+def parse_response(response: bytes, authority: str) -> DnsResponse | None:
     # Parse the header
     qid, flags, qdcount, ancount, nscount, arcount = struct.unpack('!HHHHHH', response[:12])
 
