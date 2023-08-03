@@ -19,3 +19,4 @@ I wanted to learn more about how the low-level details of DNS work, so here is m
 - Don't crash when a response contains garbage.
 - Check all parameters of the response for consistency.
 - Cache things (properly).
+- Enable EDNS support for UDP responses longer than 512 bytes.
