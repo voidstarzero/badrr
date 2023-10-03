@@ -327,7 +327,7 @@ def name_resolve(qname: str) -> list[str] | None:
             eprint('error: ', result.error)
             return None
         elif result.nxdomain:
-            eprint('info: Name does not exist')
+            eprint('info: Name resolution completed for ', qname)
             return None
         elif len(result.answers) > 0:
             eprint('info: Name resolution completed for ', qname)

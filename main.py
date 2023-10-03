@@ -19,7 +19,6 @@ def cmd_resolve(qname: str) -> bool:
 
     # The resolver either returns None...
     if addresses is None:
-        print(qname, 'does not have an address')
         return False
 
     # ... or a list with at least one element in it
