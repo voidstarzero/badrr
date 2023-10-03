@@ -53,31 +53,31 @@ FLAG_BITS_RCODE  = 0b0000000000001111  # Response code
 # Global DNS root nameserver information
 ROOT_NAME_SERVERS = [
     # Operated by Verisign, Inc.
-    ('a.root-servers.net', '198.41.0.4',     '2001:503:ba3e::2:30'),
+    ('a.root-servers.net.', '198.41.0.4',     '2001:503:ba3e::2:30'),
     # Operated by Information Sciences Institute
-    ('b.root-servers.net', '199.9.14.201',   '2001:500:200::b'),
+    ('b.root-servers.net.', '199.9.14.201',   '2001:500:200::b'),
     # Operated by Cogent Communications
-    ('c.root-servers.net', '192.33.4.12',    '2001:500:2::c'),
+    ('c.root-servers.net.', '192.33.4.12',    '2001:500:2::c'),
     # Operated by University of Maryland
-    ('d.root-servers.net', '199.7.91.13',    '2001:500:2d::d'),
+    ('d.root-servers.net.', '199.7.91.13',    '2001:500:2d::d'),
     # Operated by NASA Ames Research Center
-    ('e.root-servers.net', '192.203.230.10', '2001:500:a8::e'),
+    ('e.root-servers.net.', '192.203.230.10', '2001:500:a8::e'),
     # Operated by Information Systems Consortium, Inc.
-    ('f.root-servers.net', '192.5.5.241',    '2001:500:2f::f'),
+    ('f.root-servers.net.', '192.5.5.241',    '2001:500:2f::f'),
     # Operated by Defense Information Systems Agency
-    ('g.root-servers.net', '192.112.36.4',   '2001:500:12::d0d'),
+    ('g.root-servers.net.', '192.112.36.4',   '2001:500:12::d0d'),
     # Operated by U.S. Army DEVCOM Army Research Lab
-    ('h.root-servers.net', '198.97.190.53',  '2001:500:1::53'),
+    ('h.root-servers.net.', '198.97.190.53',  '2001:500:1::53'),
     # Operated by Netnod
-    ('i.root-servers.net', '192.36.148.17',  '2001:7fe::53'),
+    ('i.root-servers.net.', '192.36.148.17',  '2001:7fe::53'),
     # Operated by Verisign, Inc.
-    ('j.root-servers.net', '192.58.128.30',  '2001:503:c27::2:30'),
+    ('j.root-servers.net.', '192.58.128.30',  '2001:503:c27::2:30'),
     # Operated by RIPE NCC
-    ('k.root-servers.net', '193.0.14.129',   '2001:7fd::1'),
+    ('k.root-servers.net.', '193.0.14.129',   '2001:7fd::1'),
     # Operated by ICANN
-    ('l.root-servers.net', '199.7.83.42',    '2001:500:9f::42'),
+    ('l.root-servers.net.', '199.7.83.42',    '2001:500:9f::42'),
     # Operated by WIDE Project
-    ('j.root-servers.net', '202.12.27.33',   '2001:dc3::35'),
+    ('j.root-servers.net.', '202.12.27.33',   '2001:dc3::35'),
 ]
 
 # Protocol size constants
