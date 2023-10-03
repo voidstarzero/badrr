@@ -94,7 +94,7 @@ class DnsResponse:
             eprint('warning: Server included more records than I was asking for')
             return
 
-        eprint('info:     Found answer "', rdata, '"')
+        eprint('info:     Found answer ', rdata)
         self.answers.append(DnsAnswer(rdata))
 
         # Also, put the answer in the cache
@@ -124,7 +124,7 @@ class DnsResponse:
             self.error = rrparams.CODE_ERROR_STRING[rrparams.CODE_FORMERR]
             return
 
-        eprint('info:     Found referral to "', rdata, '" for zone "', rname, '"')
+        eprint('info:     Found referral to ', rdata, ' for zone ', rname)
         self.referrals.append(DnsAnswer(rdata))
 
         # Also, put the referral in the cache
@@ -145,7 +145,7 @@ class DnsResponse:
         if rtype == rrparams.TYPE_AAAA:
             return
 
-        eprint('info:     Found glue "', rdata, '" for "', rname, '"')
+        eprint('info:     Found glue ', rdata, ' for ', rname)
         self.glues[rname].append(DnsAnswer(rdata))
 
         # Also, put the address in the cache
@@ -267,16 +267,16 @@ def name_resolve(qname: str) -> list[str] | None:
 
     # If we already have an answer, finish early
     if addr_cache.contains(qname):
-        eprint('info: Address for "', qname, '" found in cache')
+        eprint('info: Address for ', qname, ' found in cache')
         return addr_cache.get(qname)
 
     # Find the closest ancestor domain that has its name server names cached
     active_zone = qname
     while active_zone != '.':
-        eprint('info: Considering if we already know about "', active_zone, '"...')
+        eprint('info: Considering if we already know about ', active_zone)
         if ns_cache.contains(active_zone):
             # If we find a cached set of name servers, pick one
-            eprint('info: Name servers for "', active_zone, '" were already cached, trying to start there...')
+            eprint('info: Name servers for ', active_zone, ' were already cached, starting there')
             name_server_name = random.choice(ns_cache.get(active_zone))
 
             # Now we need its address
@@ -285,8 +285,8 @@ def name_resolve(qname: str) -> list[str] | None:
                 name_server_addr = random.choice([addr for addr in candidate_addresses])
                 break
             else:
-                eprint('warning: Couldn\'t look up address for cached name server "', name_server_name,
-                       '", falling through')
+                eprint('warning: Couldn\'t look up address for cached name server ', name_server_name,
+                       ', falling through')
 
         # If we either failed to find cached nameservers, or couldn't find a valid address,
         # we fall to the next level
@@ -298,11 +298,10 @@ def name_resolve(qname: str) -> list[str] | None:
         name_server_name, name_server_addr, _ = random.choice(rrparams.ROOT_NAME_SERVERS)
 
     while True:
-        eprint('info: Querying "', name_server_name,
-               '" (', name_server_addr,
-               ') for "', qname,
-               '" in zone "', active_zone,
-               '"')
+        eprint('info: Querying ', name_server_name,
+               ' (', name_server_addr,
+               ') for ', qname,
+               ' in zone ', active_zone)
 
         # Build our representation of the A query to be sent to the name server
         qid = random.randrange(65536)
@@ -331,7 +330,7 @@ def name_resolve(qname: str) -> list[str] | None:
             eprint('info: Name does not exist')
             return None
         elif len(result.answers) > 0:
-            eprint('info: Name resolution completed for "', qname, '"')
+            eprint('info: Name resolution completed for ', qname)
             return [answer.rdata for answer in result.answers]
 
         # Not found but not denied either, we should try again with new auth servers
@@ -343,12 +342,12 @@ def name_resolve(qname: str) -> list[str] | None:
             name_server_addr = random.choice([glue.rdata for glue in result.glues[name_server_name]])
         else:
             # Glueless delegation requires a separate lookup for the name server address
-            eprint('info: Need address for "', name_server_name, '", restarting recursive resolution')
+            eprint('info: Need address for ', name_server_name, ', restarting recursive resolution')
 
             candidate_addresses = name_resolve(name_server_name)
             if candidate_addresses is None:
                 # We can't go on like this (nowhere to go)!
-                eprint('error: Resolution failed because "', name_server_name, '" does not have an address')
+                eprint('error: Resolution failed because ', name_server_name, ' does not have an address')
                 return None
 
             name_server_addr = random.choice([addr for addr in candidate_addresses])

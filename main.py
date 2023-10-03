@@ -13,7 +13,7 @@ def cmd_resolve(qname: str) -> bool:
     # Force the string provided to be fully-qualified, as expected by the resolver routines
     qname = name_qualify(qname)
 
-    eprint('info: Resolving name "', qname, '"')
+    eprint('info: Resolving name ', qname)
 
     addresses = name_resolve(qname)
 
