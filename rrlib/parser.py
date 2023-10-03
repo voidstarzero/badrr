@@ -136,7 +136,7 @@ def name_is_subdomain(name: str, parent: str) -> bool:
     """Determine if name is a proper subdomain of parent"""
 
     if parent == '.':
-        # The root is everything's parent
-        return True
+        # The root is the parent of everything except itself
+        return name != '.'
 
     return name.endswith('.' + parent)
