@@ -60,7 +60,7 @@ class DnsResponse:
         # Any error other than NXDOMAIN is fatal
         if rcode != rrparams.CODE_NOERROR and rcode != rrparams.CODE_NXDOMAIN:
             self.error = rrparams.CODE_ERROR_STRING[rcode]
-            eprint('error: From upstream name server: ', self.error)
+            eprint('error:    From upstream name server: ', self.error)
         elif rcode == rrparams.CODE_NXDOMAIN:
             self.nxdomain = True
 
@@ -77,7 +77,7 @@ class DnsResponse:
     def set_question(self, qname: str, qtype: int, qclass: int) -> None:
         # We only ever ask IN A questions
         if qtype != rrparams.TYPE_A or qclass != rrparams.CLASS_IN:
-            eprint('error: Wrong question type returned (not IN A)')
+            eprint('error:    Wrong question type returned (not IN A)')
             self.error = rrparams.CODE_ERROR_STRING[rrparams.CODE_FORMERR]
             return
 
@@ -86,12 +86,12 @@ class DnsResponse:
     def add_answer(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We only ever ask IN A questions
         if rtype != rrparams.TYPE_A or rclass != rrparams.CLASS_IN:
-            eprint('warning: Extra resource record found in answer section (not IN A)')
+            eprint('warning:  Extra resource record found in answer section (not IN A)')
             return
 
         # We should also reasonably expect the answer to be to our question
         if rname != self.question.qname:
-            eprint('warning: Server included more records than I was asking for')
+            eprint('warning:  Server included more records than I was asking for')
             return
 
         eprint('info:     Found answer ', rdata)
@@ -103,7 +103,7 @@ class DnsResponse:
     def add_authority(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN NS records here
         if rtype not in (rrparams.TYPE_NS, rrparams.TYPE_SOA) or rclass != rrparams.CLASS_IN:
-            eprint('warning: Extra resource record found in authority section (not IN NS/SOA)')
+            eprint('warning:  Extra resource record found in authority section (not IN NS/SOA)')
             return
 
         # We don't care if someone has packaged us up a spare SOA we didn't ask for,
@@ -113,14 +113,14 @@ class DnsResponse:
 
         # Make sure we're only being referred to a subdomain of the current authority
         if not name_is_subdomain(rname, self.authority_zone):
-            eprint('warning: A referral to a non-subdomain was present, and is being ignored')
+            eprint('warning:  A referral to a non-subdomain was present, and is being ignored')
             return
 
         # The first referral sets the subdomain being referred to, the rest must be the same
         if self.referral_zone is None:
             self.referral_zone = rname
         elif rname != self.referral_zone:
-            eprint('error: Inconsistent referrals present in the response, I\'m confused')
+            eprint('error:    Inconsistent referrals present in the response, I\'m confused')
             self.error = rrparams.CODE_ERROR_STRING[rrparams.CODE_FORMERR]
             return
 
@@ -133,12 +133,12 @@ class DnsResponse:
     def add_additional(self, rname: str, rtype: int, rclass: int, rdata: str) -> None:
         # We are expecting only IN A glue records here
         if rtype not in (rrparams.TYPE_A, rrparams.TYPE_AAAA) or rclass != rrparams.CLASS_IN:
-            eprint('warning: Extra resource record found in additional section (not IN A/AAAA)')
+            eprint('warning:  Extra resource record found in additional section (not IN A/AAAA)')
             return
 
         # Flag glue that has no relation to the referrals, and don't use it
         if DnsAnswer(rname) not in self.referrals:
-            eprint('warning: Unnecessary glue received, eww sticky')
+            eprint('warning:  Unnecessary glue received, eww sticky')
             return
 
         # Silently discard IPv6 (we're not using it at the moment)
@@ -158,13 +158,13 @@ def parse_response(response: bytes, authority: str) -> DnsResponse | None:
 
     # Handle truncation early, no point working through the rest of the steps on half a message
     if flags & rrparams.FLAG_BIT_TC:
-        eprint('warning: Response truncated, bailing out early')
+        eprint('warning:  Response truncated, bailing out early')
         return None
 
     result = DnsResponse(flags & rrparams.FLAG_BITS_RCODE, authority)
 
     if qdcount != 1:
-        eprint('error: Received other than 1 question in response')
+        eprint('error:    Received other than 1 question in response')
         return None
 
     # The question begins with the name asked for
@@ -267,16 +267,16 @@ def name_resolve(qname: str) -> list[str] | None:
 
     # If we already have an answer, finish early
     if addr_cache.contains(qname):
-        eprint('info: Address for ', qname, ' found in cache')
+        eprint('info:     Address for ', qname, ' found in cache')
         return addr_cache.get(qname)
 
     # Find the closest ancestor domain that has its name server names cached
     active_zone = qname
     while active_zone != '.':
-        eprint('info: Considering if we already know about ', active_zone)
+        eprint('info:     Considering if we already know about ', active_zone)
         if ns_cache.contains(active_zone):
             # If we find a cached set of name servers, pick one
-            eprint('info: Name servers for ', active_zone, ' were already cached, starting there')
+            eprint('info:     Name servers for ', active_zone, ' were already cached, starting there')
             name_server_name = random.choice(ns_cache.get(active_zone))
 
             # Now we need its address
@@ -285,7 +285,7 @@ def name_resolve(qname: str) -> list[str] | None:
                 name_server_addr = random.choice([addr for addr in candidate_addresses])
                 break
             else:
-                eprint('warning: Couldn\'t look up address for cached name server ', name_server_name,
+                eprint('warning:  Couldn\'t look up address for cached name server ', name_server_name,
                        ', falling through')
 
         # If we either failed to find cached nameservers, or couldn't find a valid address,
@@ -318,7 +318,7 @@ def name_resolve(qname: str) -> list[str] | None:
 
         # If failed for some reason (probably because the packet was lost or discarded due to truncation)
         if result is None:
-            eprint("info: UDP query failed, retrying with TCP...")
+            eprint("info: UDP query failed, retrying with TCP")
 
             response = send_query_tcp(message, (name_server_addr, rrparams.PORT_DNS_TCP))
             result = parse_response(response, active_zone)
